@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+sqlalchemy[asyncio]
+asyncpg
+pydantic
+pydantic-settings
+firebase-admin
+httpx
+python-jose[cryptography]
+redis
+passlib[bcrypt]
+psutil

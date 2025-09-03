@@ -1,3 +1,11 @@
+import { logger } from './logger'
+import {
+  getSecureToken,
+  setSecureToken,
+  clearSecureTokens,
+  hasValidToken
+} from './secure-storage'
+
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"
 
 const API_BASE =
@@ -5,26 +13,56 @@ const API_BASE =
   process.env.NEXT_PUBLIC_GROFAST_API_URL ||
   "https://staging-api.grofast.com"
 
+// Validate API base URL
+if (!API_BASE) {
+  throw new Error('API base URL is not configured. Please set NEXT_PUBLIC_GROFAST_API_URL environment variable.')
+}
+
+// Validate security context in production
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'production') {
+  if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+    logger.error('Application must run over HTTPS in production')
+    throw new Error('Insecure context detected. HTTPS required in production.')
+  }
+}
+
+/**
+ * Get stored token securely
+ * @deprecated Use getSecureToken instead
+ */
 export function getStoredToken() {
-  if (typeof window === "undefined") return undefined
-  return localStorage.getItem("firebase_token") || undefined
+  logger.warn('getStoredToken is deprecated, use secure storage instead')
+  return getSecureToken()
 }
 
+/**
+ * Set stored token securely
+ * @deprecated Use setSecureToken instead
+ */
 export function setStoredToken(token: string) {
-  if (typeof window === "undefined") return
-  localStorage.setItem("firebase_token", token)
-  window.dispatchEvent(new StorageEvent("storage", { key: "firebase_token", newValue: token }))
+  logger.warn('setStoredToken is deprecated, use secure storage instead')
+  setSecureToken(token)
 }
 
+/**
+ * Clear stored token securely
+ * @deprecated Use clearSecureTokens instead
+ */
 export function clearStoredToken() {
-  if (typeof window === "undefined") return
-  localStorage.removeItem("firebase_token")
-  window.dispatchEvent(new StorageEvent("storage", { key: "firebase_token", newValue: null as any }))
+  logger.warn('clearStoredToken is deprecated, use secure storage instead')
+  clearSecureTokens()
 }
 
+/**
+ * Get Firebase token with security checks
+ */
 function getFirebaseToken() {
   if (typeof window === "undefined") return undefined
-  return getStoredToken() || process.env.NEXT_PUBLIC_DEV_FIREBASE_TOKEN || undefined
+
+  // Get token from secure storage
+  const token = getSecureToken()
+
+  return token || process.env.NEXT_PUBLIC_DEV_FIREBASE_TOKEN || undefined
 }
 
 export class ApiError extends Error {
@@ -39,46 +77,96 @@ export class ApiError extends Error {
   }
 }
 
+interface RequestOptions {
+  method?: HttpMethod
+  body?: unknown
+  auth?: boolean
+  headers?: Record<string, string>
+  timeout?: number
+}
+
 async function request<T>(
   path: string,
-  opts: { method?: HttpMethod; body?: any; auth?: boolean; headers?: Record<string, string> } = {},
+  opts: RequestOptions = {},
 ): Promise<T> {
+  const method = opts.method || "GET"
+  const url = `${API_BASE}${path}`
+
+  // Log API request
+  logger.apiRequest(method, url, opts.body)
+
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
+    'X-Requested-With': 'XMLHttpRequest',
     ...(opts.headers || {}),
   }
 
   if (opts.auth) {
     const token = getFirebaseToken()
-    if (token) headers.Authorization = `Bearer ${token}`
+    if (token) {
+      // Backend expects firebase_token header, not Authorization Bearer
+      headers['firebase_token'] = token
+    } else {
+      logger.warn('Auth required but no token available', { path, method })
+    }
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: opts.method || "GET",
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-    cache: "no-store",
-  })
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), opts.timeout || 30000)
 
-  const contentType = res.headers.get("content-type") || ""
-  const isJson = contentType.includes("application/json")
-  const data = isJson ? await res.json().catch(() => undefined) : undefined
+  try {
+    const res = await fetch(url, {
+      method,
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      cache: "no-store",
+      signal: controller.signal,
+    })
 
-  if (!res.ok) {
-    const message = (data && (data.error || data.message)) || `Request failed: ${res.status}`
+    clearTimeout(timeoutId)
 
-    if (typeof window !== "undefined" && res.status === 401) {
-      clearStoredToken()
-      if (!window.location.pathname.startsWith("/auth")) {
-        window.location.href = "/auth/login"
+    const contentType = res.headers.get("content-type") || ""
+    const isJson = contentType.includes("application/json")
+    const data = isJson ? await res.json().catch(() => undefined) : undefined
+
+    // Log API response
+    logger.apiResponse(method, url, res.status, data)
+
+    if (!res.ok) {
+      const message = (data && (data.error || data.message)) || `Request failed: ${res.status}`
+
+      if (typeof window !== "undefined" && res.status === 401) {
+        logger.warn('Unauthorized request, clearing tokens and redirecting', { path, method })
+        clearSecureTokens()
+
+        if (!window.location.pathname.startsWith("/auth")) {
+          // Add a small delay to prevent rapid redirects
+          setTimeout(() => {
+            window.location.href = "/auth/login"
+          }, 100)
+        }
       }
+
+      throw new ApiError(message, res.status, data?.code, data?.details)
     }
 
-    throw new ApiError(message, res.status, data?.code, data?.details)
-  }
+    return data as T
+  } catch (error) {
+    clearTimeout(timeoutId)
 
-  return data as T
+    if (error instanceof ApiError) {
+      throw error
+    }
+
+    if (error instanceof Error && error.name === 'AbortError') {
+      logger.error('API request timeout', { path, method, timeout: opts.timeout })
+      throw new ApiError('Request timeout', 408)
+    }
+
+    logger.error('API request failed', { path, method, error })
+    throw new ApiError('Network error', 0, 'NETWORK_ERROR', error)
+  }
 }
 
 /**
@@ -92,8 +180,34 @@ export const api = {
       body: payload,
     })
   },
-  me() {
+  googleLogin(payload: { google_id_token: string }) {
+    return request<{ id: number } & Record<string, any>>("/auth/google-login", {
+      method: "POST",
+      body: payload,
+    })
+  },
+  me(firebase_token?: string) {
+    if (firebase_token) {
+      // Use query parameter method for /auth/me endpoint
+      return request(`/auth/me?firebase_token=${firebase_token}`)
+    }
     return request("/auth/me", { auth: true })
+  },
+  updateProfile(payload: { name?: string; email?: string; phone?: string }, firebase_token: string) {
+    return request(`/auth/me?firebase_token=${firebase_token}`, {
+      method: "PUT",
+      body: payload,
+    })
+  },
+  logout(firebase_token: string) {
+    return request(`/auth/logout?firebase_token=${firebase_token}`, {
+      method: "POST",
+    })
+  },
+  validateToken(firebase_token: string) {
+    return request(`/auth/validate-token?firebase_token=${firebase_token}`, {
+      method: "POST",
+    })
   },
 
   // Categories & Products
@@ -141,7 +255,7 @@ export const api = {
   },
   clearCart() {
     return request<{ message: string; cart: components["schemas"]["CartResponse"] }>("/cart/clear", {
-      method: "POST",
+      method: "DELETE",
       auth: true,
     })
   },
@@ -194,20 +308,167 @@ export type OrderResponse = components["schemas"]["OrderResponse"]
 export type DeliveryPartnerResponse = components["schemas"]["DeliveryPartnerResponse"]
 
 export const deliveryApi = {
-  me() {
+  me(firebase_token?: string) {
+    if (firebase_token) {
+      return request<DeliveryPartnerResponse>(`/delivery/me?firebase_token=${firebase_token}`)
+    }
     return request<DeliveryPartnerResponse>("/delivery/me", { auth: true })
   },
-  updateStatus(payload: { is_available: boolean; current_location?: { latitude?: number; longitude?: number } }) {
+  updateStatus(payload: { status: 'available' | 'busy' | 'offline'; current_location?: { latitude?: number; longitude?: number } }, firebase_token?: string) {
+    if (firebase_token) {
+      return request<DeliveryPartnerResponse>(`/delivery/status?firebase_token=${firebase_token}`, {
+        method: "PUT",
+        body: payload,
+      })
+    }
     return request<DeliveryPartnerResponse>("/delivery/status", {
       method: "PUT",
       body: payload,
       auth: true,
     })
   },
-  sendLocation(payload: { latitude: number; longitude: number; order_id?: number }) {
+  sendLocation(payload: { latitude: number; longitude: number; order_id?: number }, firebase_token?: string) {
+    if (firebase_token) {
+      return request<{ message: string; timestamp: string }>(`/delivery/location?firebase_token=${firebase_token}`, {
+        method: "POST",
+        body: payload,
+      })
+    }
     return request<{ message: string; timestamp: string }>("/delivery/location", {
       method: "POST",
       body: payload,
+      auth: true,
+    })
+  },
+  getOrders(firebase_token?: string) {
+    if (firebase_token) {
+      return request<{ orders: OrderResponse[] }>(`/delivery/orders?firebase_token=${firebase_token}`)
+    }
+    return request<{ orders: OrderResponse[] }>("/delivery/orders", { auth: true })
+  },
+}
+
+// Admin API endpoints
+export const adminApi = {
+  getStats(firebase_token?: string) {
+    if (firebase_token) {
+      return request(`/admin/stats?firebase_token=${firebase_token}`)
+    }
+    return request("/admin/stats", { auth: true })
+  },
+  getProducts(params?: { page?: number; size?: number }, firebase_token?: string) {
+    const q = new URLSearchParams()
+    Object.entries(params || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") q.set(k, String(v))
+    })
+    const queryString = q.toString()
+
+    if (firebase_token) {
+      const separator = queryString ? '&' : ''
+      return request(`/admin/products?${queryString}${separator}firebase_token=${firebase_token}`)
+    }
+    return request(`/admin/products${queryString ? `?${queryString}` : ''}`, { auth: true })
+  },
+  createProduct(payload: {
+    name: string
+    description: string
+    price: number
+    category_id: number
+    image_url?: string
+    stock_quantity?: number
+  }, firebase_token?: string) {
+    if (firebase_token) {
+      return request(`/admin/products?firebase_token=${firebase_token}`, {
+        method: "POST",
+        body: payload,
+      })
+    }
+    return request("/admin/products", {
+      method: "POST",
+      body: payload,
+      auth: true,
+    })
+  },
+  updateProduct(productId: number, payload: {
+    name?: string
+    description?: string
+    price?: number
+    category_id?: number
+    image_url?: string
+    stock_quantity?: number
+  }, firebase_token?: string) {
+    if (firebase_token) {
+      return request(`/admin/products/${productId}?firebase_token=${firebase_token}`, {
+        method: "PUT",
+        body: payload,
+      })
+    }
+    return request(`/admin/products/${productId}`, {
+      method: "PUT",
+      body: payload,
+      auth: true,
+    })
+  },
+  deleteProduct(productId: number, firebase_token?: string) {
+    if (firebase_token) {
+      return request(`/admin/products/${productId}?firebase_token=${firebase_token}`, {
+        method: "DELETE",
+      })
+    }
+    return request(`/admin/products/${productId}`, {
+      method: "DELETE",
+      auth: true,
+    })
+  },
+  getAllOrders(params?: { page?: number; size?: number; status?: string }, firebase_token?: string) {
+    const q = new URLSearchParams()
+    Object.entries(params || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") q.set(k, String(v))
+    })
+    const queryString = q.toString()
+
+    if (firebase_token) {
+      const separator = queryString ? '&' : ''
+      return request(`/admin/orders?${queryString}${separator}firebase_token=${firebase_token}`)
+    }
+    return request(`/admin/orders${queryString ? `?${queryString}` : ''}`, { auth: true })
+  },
+}
+
+// Notification API endpoints
+export const notificationApi = {
+  sendNotification(payload: {
+    user_id: number
+    title: string
+    body: string
+    data?: Record<string, any>
+  }, firebase_token?: string) {
+    if (firebase_token) {
+      return request(`/notifications/send?firebase_token=${firebase_token}`, {
+        method: "POST",
+        body: payload,
+      })
+    }
+    return request("/notifications/send", {
+      method: "POST",
+      body: payload,
+      auth: true,
+    })
+  },
+  getUserNotifications(firebase_token?: string) {
+    if (firebase_token) {
+      return request(`/notifications/user?firebase_token=${firebase_token}`)
+    }
+    return request("/notifications/user", { auth: true })
+  },
+  markAsRead(notificationId: number, firebase_token?: string) {
+    if (firebase_token) {
+      return request(`/notifications/${notificationId}/read?firebase_token=${firebase_token}`, {
+        method: "PUT",
+      })
+    }
+    return request(`/notifications/${notificationId}/read`, {
+      method: "PUT",
       auth: true,
     })
   },

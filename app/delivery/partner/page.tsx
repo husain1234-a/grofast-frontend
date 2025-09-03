@@ -1,69 +1,161 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { MapPin, Package, DollarSign, Clock, Navigation } from 'lucide-react';
-import { useApi } from '@/hooks/use-api';
+import { MapPin, Package, DollarSign, Clock, Navigation, RefreshCw } from 'lucide-react';
+import { deliveryApi, type DeliveryPartnerResponse, type OrderResponse } from '@/lib/api-client';
+import { useAuth } from '@/app/auth-provider';
+import { toast } from '@/hooks/use-toast';
+import { logger } from '@/lib/logger';
 
 export default function DeliveryPartnerPage() {
-  const [partner, setPartner] = useState<any>(null);
-  const [orders, setOrders] = useState<any[]>([]);
-  const [location, setLocation] = useState({ lat: 0, lng: 0 });
-  const { get, post } = useApi();
+  const { token } = useAuth();
+  const [partner, setPartner] = useState<DeliveryPartnerResponse | null>(null);
+  const [orders, setOrders] = useState<OrderResponse[]>([]);
+  const [location, setLocation] = useState({ latitude: 0, longitude: 0 });
+  const [status, setStatus] = useState<'available' | 'busy' | 'offline'>('offline');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadPartnerData();
-    getCurrentLocation();
-  }, []);
+    if (token) {
+      loadPartnerData();
+      getCurrentLocation();
+    }
+  }, [token]);
 
   const loadPartnerData = async () => {
     try {
-      const [partnerRes, ordersRes] = await Promise.all([
-        get('/delivery/me'),
-        get('/delivery/orders')
+      const [partnerData, ordersData] = await Promise.all([
+        deliveryApi.me(token),
+        deliveryApi.getOrders(token)
       ]);
-      setPartner(partnerRes.data);
-      setOrders(ordersRes.data);
+      setPartner(partnerData);
+      setOrders(ordersData.orders);
+      setStatus(partnerData.status || 'offline');
     } catch (error) {
-      console.error('Failed to load partner data:', error);
+      logger.error('Failed to load partner data', error);
+      toast({ variant: "destructive", title: "Error", description: "Failed to load delivery partner data" });
+    } finally {
+      setLoading(false);
     }
   };
 
   const getCurrentLocation = () => {
-    navigator.geolocation.getCurrentPosition((position) => {
-      const newLocation = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude
-      };
-      setLocation(newLocation);
-      updateLocation(newLocation);
-    });
-  };
-
-  const updateLocation = async (coords: { lat: number; lng: number }) => {
-    try {
-      await post('/delivery/location', coords);
-    } catch (error) {
-      console.error('Failed to update location:', error);
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const newLocation = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude
+          };
+          setLocation(newLocation);
+          updateLocation(newLocation);
+          toast({ title: "Location Updated", description: "Your location has been updated successfully" });
+        },
+        (error) => {
+          logger.error('Geolocation error', error);
+          toast({ variant: "destructive", title: "Location Error", description: "Failed to get your location" });
+        }
+      );
     }
   };
 
-  const updateOrderStatus = async (orderId: string, status: string) => {
+  const updateLocation = async (coords: { latitude: number; longitude: number }) => {
     try {
-      await post(`/delivery/orders/${orderId}/status`, { status });
-      loadPartnerData();
+      await deliveryApi.sendLocation(coords, token);
     } catch (error) {
-      console.error('Failed to update order status:', error);
+      logger.error('Failed to update location', error);
+      toast({ variant: "destructive", title: "Error", description: "Failed to update location" });
     }
   };
 
-  if (!partner) return <div className="p-4">Loading...</div>;
+  const toggleAvailability = async () => {
+    try {
+      const newStatus = status === 'offline' ? 'available' : 'offline';
+      await deliveryApi.updateStatus({ 
+        status: newStatus, 
+        current_location: location 
+      }, token);
+      setStatus(newStatus);
+      toast({ 
+        title: newStatus === 'available' ? "You're now available" : "You're now offline",
+        description: newStatus === 'available' ? "You can receive new orders" : "You won't receive new orders"
+      });
+    } catch (error) {
+      logger.error('Failed to update availability', error);
+      toast({ variant: "destructive", title: "Error", description: "Failed to update availability status" });
+    }
+  };
+
+  const updateOrderStatus = async (orderId: number, status: string) => {
+    try {
+      // Note: This endpoint may need to be implemented in the backend
+      // For now, we'll simulate it by calling the order API
+      await fetch(`${process.env.NEXT_PUBLIC_GROFAST_API_URL}/delivery/orders/${orderId}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'firebase_token': token
+        },
+        body: JSON.stringify({ status })
+      });
+      
+      // Refresh the orders list
+      await loadPartnerData();
+      toast({ 
+        title: "Order Status Updated", 
+        description: `Order ${orderId} status changed to ${status.replace('_', ' ')}` 
+      });
+    } catch (error) {
+      logger.error('Failed to update order status', error);
+      toast({ 
+        variant: "destructive", 
+        title: "Error", 
+        description: "Failed to update order status" 
+      });
+    }
+  };
+
+  if (loading) return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2" />
+        <div>Loading delivery dashboard...</div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Header */}
         <div className="bg-white rounded-2xl p-6 shadow-sm">
-          <h1 className="text-2xl font-bold text-gray-900 mb-4">Delivery Dashboard</h1>
+          <div className="flex justify-between items-center mb-4">
+            <h1 className="text-2xl font-bold text-gray-900">Delivery Dashboard</h1>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">Status:</span>
+                <button
+                  onClick={toggleAvailability}
+                  className={`px-4 py-2 rounded-full text-sm font-medium capitalize ${
+                    status === 'available'
+                      ? 'bg-green-100 text-green-800 hover:bg-green-200' 
+                      : status === 'busy'
+                      ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
+                      : 'bg-red-100 text-red-800 hover:bg-red-200'
+                  }`}
+                >
+                  {status === 'offline' ? 'Offline' : status}
+                </button>
+              </div>
+              <button
+                onClick={loadPartnerData}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Refresh
+              </button>
+            </div>
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="text-center">
               <Package className="w-8 h-8 text-grofast-green mx-auto mb-2" />
@@ -101,7 +193,7 @@ export default function DeliveryPartnerPage() {
             </button>
           </div>
           <p className="text-sm text-gray-600 mt-2">
-            Lat: {location.lat.toFixed(6)}, Lng: {location.lng.toFixed(6)}
+            Lat: {location.latitude.toFixed(6)}, Lng: {location.longitude.toFixed(6)}
           </p>
         </div>
 
@@ -119,16 +211,15 @@ export default function DeliveryPartnerPage() {
                   </div>
                   <div className="text-right">
                     <div className="text-lg font-bold">₹{order.total}</div>
-                    <div className={`text-xs px-2 py-1 rounded-full ${
-                      order.status === 'picked_up' ? 'bg-blue-100 text-blue-800' :
+                    <div className={`text-xs px-2 py-1 rounded-full ${order.status === 'picked_up' ? 'bg-blue-100 text-blue-800' :
                       order.status === 'out_for_delivery' ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-gray-100 text-gray-800'
-                    }`}>
+                        'bg-gray-100 text-gray-800'
+                      }`}>
                       {order.status.replace('_', ' ').toUpperCase()}
                     </div>
                   </div>
                 </div>
-                
+
                 <div className="flex gap-2">
                   {order.status === 'assigned' && (
                     <button

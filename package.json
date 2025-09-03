@@ -4,12 +4,18 @@
   "description": "GroFast - Ultra-fast grocery delivery platform",
   "private": true,
   "scripts": {
-    "build": "next build",
+    "build": "npm run build:check && next build",
+    "build:check": "node scripts/build-check.js",
+    "build:prod": "npm run lint && npm run type-check && npm run build",
     "dev": "next dev",
     "lint": "next lint",
-    "start": "next start"
+    "lint:fix": "next lint --fix",
+    "type-check": "tsc --noEmit",
+    "start": "next start",
+    "generate-types": "node scripts/generate-openapi-types.ts"
   },
   "dependencies": {
+    "@google-cloud/firestore": "^7.11.3",
     "@hookform/resolvers": "latest",
     "@radix-ui/react-accordion": "1.2.2",
     "@radix-ui/react-alert-dialog": "1.1.4",
@@ -47,7 +53,9 @@
     "cmdk": "1.0.4",
     "date-fns": "4.1.0",
     "embla-carousel-react": "8.5.1",
+    "firebase": "^12.2.1",
     "geist": "^1.3.1",
+    "google-auth-library": "^10.3.0",
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
     "next": "15.2.4",

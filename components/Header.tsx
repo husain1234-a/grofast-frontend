@@ -5,30 +5,35 @@ import { useCart } from "@/hooks/use-api"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/app/auth-provider"
-import { Search, MapPin, ShoppingCart, User, ChevronDown } from "lucide-react"
+import { Search, ShoppingCart, User, Phone } from "lucide-react"
+import LocationSelector from "./LocationSelector"
+import { useLocation } from "@/hooks/use-location"
 
 export function Header() {
   const { data: cart } = useCart()
   const [q, setQ] = useState("")
   const router = useRouter()
   const { user, logout, token } = useAuth()
-  const [location, setLocation] = useState("Mumbai, Maharashtra")
+  const { location, setLocation } = useLocation()
 
   return (
     <header className="w-full bg-white sticky top-0 z-50 grofast-shadow">
       {/* Top bar with location */}
       <div className="bg-[#00B761] text-white px-4 py-1">
         <div className="mx-auto max-w-6xl flex items-center justify-between text-xs">
-          <div className="flex items-center gap-1">
-            <MapPin className="h-3 w-3" />
-            <span className="font-medium">Delivering to:</span>
-            <button className="flex items-center gap-1 hover:underline">
-              <span>{location}</span>
-              <ChevronDown className="h-3 w-3" />
-            </button>
-          </div>
+          <LocationSelector
+            currentLocation={location}
+            onLocationChange={setLocation}
+          />
           <div className="hidden sm:flex items-center gap-4">
-            <span>📞 Customer Care: 1800-123-4567</span>
+            <a
+              href="tel:+918001234567"
+              className="flex items-center gap-1 hover:underline transition-colors"
+              aria-label="Call customer care"
+            >
+              <Phone className="h-3 w-3" />
+              <span>Customer Care: 1800-123-4567</span>
+            </a>
             <span>⏰ Delivery in 10-15 mins</span>
           </div>
         </div>
@@ -70,9 +75,18 @@ export function Header() {
 
         {/* Right side actions */}
         <div className="flex items-center gap-3 flex-shrink-0">
+          {/* Mobile phone number */}
+          <a
+            href="tel:+918001234567"
+            className="sm:hidden flex items-center justify-center w-10 h-10 rounded-full bg-[#00B761] text-white hover:bg-[#009653] transition-colors"
+            aria-label="Call customer care"
+          >
+            <Phone className="h-4 w-4" />
+          </a>
+
           {!token ? (
-            <Link 
-              href="/auth/login" 
+            <Link
+              href="/auth/login"
               className="flex items-center gap-1 text-sm text-gray-700 hover:text-[#00B761] transition-colors"
             >
               <User className="h-4 w-4" />
@@ -80,8 +94,8 @@ export function Header() {
             </Link>
           ) : (
             <>
-              <Link 
-                href="/auth/profile" 
+              <Link
+                href="/auth/profile"
                 className="flex items-center gap-1 text-sm text-gray-700 hover:text-[#00B761] transition-colors"
               >
                 <User className="h-4 w-4" />
@@ -89,21 +103,27 @@ export function Header() {
                   {user?.name ? `Hi, ${user.name.split(" ")[0]}` : "Profile"}
                 </span>
               </Link>
-              <Link 
-                href="/delivery/partner" 
+              <Link
+                href="/delivery/partner"
                 className="hidden sm:inline text-sm text-gray-700 hover:text-[#00B761] transition-colors"
               >
                 Partner
               </Link>
-              <button 
-                onClick={logout} 
+              <Link
+                href="/admin"
+                className="hidden sm:inline text-sm text-gray-700 hover:text-[#00B761] transition-colors"
+              >
+                Admin
+              </Link>
+              <button
+                onClick={logout}
                 className="hidden sm:inline text-sm text-gray-700 hover:text-[#00B761] transition-colors"
               >
                 Logout
               </button>
             </>
           )}
-          
+
           {/* Cart button */}
           <Link
             href="/cart"

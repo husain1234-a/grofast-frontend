@@ -4,6 +4,8 @@ import { Inter } from "next/font/google"
 import "./globals.css"
 import ClientLayout from "./ClientLayout"
 import Providers from "./providers"
+import ErrorBoundary from "@/components/ErrorBoundary"
+import { Toaster } from "@/components/Toaster"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -53,9 +55,12 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="GroFast" />
       </head>
       <body className={`${inter.className} touch-manipulation tap-highlight-transparent`}>
-        <Providers>
-          <ClientLayout>{children}</ClientLayout>
-        </Providers>
+        <ErrorBoundary>
+          <Providers>
+            <ClientLayout>{children}</ClientLayout>
+            <Toaster />
+          </Providers>
+        </ErrorBoundary>
       </body>
     </html>
   )

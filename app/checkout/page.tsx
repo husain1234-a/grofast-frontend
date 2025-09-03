@@ -5,6 +5,8 @@ import { api } from "@/lib/api-client"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/app/auth-provider"
+import { logger } from "@/lib/logger"
+import { toast } from "@/hooks/use-toast"
 import { ArrowLeft, MapPin, Clock, CreditCard, Wallet, Smartphone, Banknote, Edit, Truck } from "lucide-react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -90,8 +92,12 @@ export default function CheckoutPage() {
       // Redirect to order confirmation page
       router.push(`/orders/${order.id}`)
     } catch (error) {
-      console.error("Failed to create order:", error)
-      // Handle error (show toast, etc.)
+      logger.error("Failed to create order", error)
+      toast({
+        variant: "destructive",
+        title: "Order Failed",
+        description: "Unable to create your order. Please try again.",
+      })
     } finally {
       setIsSubmitting(false)
     }
@@ -124,7 +130,7 @@ export default function CheckoutPage() {
               <div className="text-sm text-gray-500">{cart.total_items} items • ₹{finalAmount.toFixed(2)}</div>
             </div>
           </div>
-          
+
           {/* Cart items preview */}
           <div className="space-y-3">
             {cart.items.slice(0, 3).map((item) => (
@@ -166,7 +172,7 @@ export default function CheckoutPage() {
               <MapPin className="h-5 w-5 text-[#00B761]" />
               <h2 className="font-semibold text-[#1A1A1A]">Delivery Address</h2>
             </div>
-            
+
             <div className="space-y-3">
               <textarea
                 {...register("delivery_address")}
@@ -177,7 +183,7 @@ export default function CheckoutPage() {
               {errors.delivery_address && (
                 <p className="text-[#FF6B6B] text-sm">{errors.delivery_address.message}</p>
               )}
-              
+
               {user?.address && user.address !== watch("delivery_address") && (
                 <button
                   type="button"
@@ -197,7 +203,7 @@ export default function CheckoutPage() {
               <Clock className="h-5 w-5 text-[#00B761]" />
               <h2 className="font-semibold text-[#1A1A1A]">Delivery Time</h2>
             </div>
-            
+
             <div className="grid grid-cols-2 gap-2">
               {timeSlots.map((slot) => (
                 <label
@@ -232,7 +238,7 @@ export default function CheckoutPage() {
               <CreditCard className="h-5 w-5 text-[#00B761]" />
               <h2 className="font-semibold text-[#1A1A1A]">Payment Method</h2>
             </div>
-            
+
             <div className="space-y-2">
               {paymentMethods.map((method) => {
                 const Icon = method.icon
@@ -294,7 +300,7 @@ export default function CheckoutPage() {
                 <span className="text-[#1A1A1A]">₹{finalAmount.toFixed(2)}</span>
               </div>
             </div>
-            
+
             <div className="bg-[#E8F5E8] p-3 rounded-xl mt-4">
               <div className="flex items-center gap-2 text-sm">
                 <Truck className="h-4 w-4 text-[#00B761]" />
@@ -328,7 +334,7 @@ export default function CheckoutPage() {
                 </>
               )}
             </button>
-            
+
             <div className="flex items-center justify-center gap-2 mt-3 text-xs text-gray-500">
               <Clock className="h-3 w-3" />
               <span>Expected delivery by {new Date(Date.now() + 15 * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>

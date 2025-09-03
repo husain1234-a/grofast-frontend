@@ -14,6 +14,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err)
+  console.error('Failed to generate OpenAPI types:', err)
   process.exit(1)
 })

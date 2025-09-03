@@ -3,7 +3,11 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Phone, ArrowRight } from 'lucide-react';
-import { api, setStoredToken } from '@/lib/api-client';
+import { api } from '@/lib/api-client';
+import { useAuth } from '@/app/auth-provider';
+import { logger } from '@/lib/logger';
+import { toast } from '@/hooks/use-toast';
+import GoogleSignInButton from '@/components/GoogleSignInButton';
 
 export default function LoginPage() {
   const [phone, setPhone] = useState('');
@@ -11,6 +15,7 @@ export default function LoginPage() {
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const { loginWithToken } = useAuth();
   const sendOtp = async () => {
     setLoading(true);
     try {
@@ -18,7 +23,12 @@ export default function LoginPage() {
       // For now, just move to OTP step
       setStep('otp');
     } catch (error) {
-      console.error('Failed to send OTP:', error);
+      logger.error('Failed to send OTP', error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to send OTP. Please try again.",
+      })
     } finally {
       setLoading(false);
     }
@@ -27,13 +37,29 @@ export default function LoginPage() {
   const verifyOtp = async () => {
     setLoading(true);
     try {
-      // Mock Firebase token for demo
+      // Mock Firebase token for demo (in production, get this from Firebase SDK)
       const mockFirebaseToken = 'mock-firebase-token-' + Date.now();
+
+      // Verify with backend
       const response = await api.verifyOtp({ firebase_id_token: mockFirebaseToken });
-      setStoredToken(mockFirebaseToken);
+
+      // Use secure login method
+      await loginWithToken(mockFirebaseToken);
+
+      toast({
+        variant: "success",
+        title: "Login Successful",
+        description: "Welcome to GroFast!",
+      });
+
       router.push('/');
     } catch (error) {
-      console.error('Failed to verify OTP:', error);
+      logger.error('Failed to verify OTP', error);
+      toast({
+        variant: "destructive",
+        title: "Verification Failed",
+        description: "Invalid OTP. Please try again.",
+      })
     } finally {
       setLoading(false);
     }
@@ -49,6 +75,24 @@ export default function LoginPage() {
 
         {step === 'phone' ? (
           <div className="space-y-6">
+            {/* Google Sign In */}
+            <div className="space-y-4">
+              <GoogleSignInButton
+                onSuccess={() => router.push('/')}
+                disabled={loading}
+              />
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300" />
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-white text-gray-500">Or continue with phone</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Phone Number Input */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Enter your mobile number
