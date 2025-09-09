@@ -29,6 +29,8 @@ export function LocationSelector({
     const [searchTerm, setSearchTerm] = useState("")
     const [cities, setCities] = useState<City[]>([])
     const [loading, setLoading] = useState(false)
+    const [showManualInput, setShowManualInput] = useState(false)
+    const [manualLocation, setManualLocation] = useState("")
     const [popularCities] = useState<City[]>([
         { name: "Mumbai", state: "Maharashtra", country: "India" },
         { name: "Delhi", state: "Delhi", country: "India" },
@@ -321,47 +323,282 @@ export function LocationSelector({
 
                         {/* Current location option */}
                         <div className="border-t pt-3 mt-3">
+                            {/* Show current coordinates for debugging */}
+                            {process.env.NEXT_PUBLIC_ENV === 'development' && (
+                                <div className="text-xs text-gray-400 mb-2 font-mono">
+                                    Debug: Click location button to see coordinates in console
+                                </div>
+                            )}
                             <button
-                                onClick={() => {
-                                    // Request user's current location
-                                    if (navigator.geolocation) {
+                                onClick={async () => {
+                                    // GPS-optimized location detection
+                                    if (!navigator.geolocation) {
+                                        console.error('Geolocation is not supported by this browser.')
+                                        return
+                                    }
+                                    
+                                    setLoading(true)
+                                    
+                                    // GPS-first location detection with multiple attempts
+                                    const getGPSLocation = () => new Promise((resolve, reject) => {
                                         navigator.geolocation.getCurrentPosition(
                                             async (position) => {
                                                 try {
-                                                    const { latitude, longitude } = position.coords
+                                                    const { latitude, longitude, accuracy, timestamp } = position.coords
+                                                    
+                                                    // Safely handle timestamp (might be null/undefined)
+                                                    const timestampDate = timestamp ? new Date(timestamp) : new Date()
+                                                    const isValidTimestamp = timestamp && !isNaN(timestampDate.getTime())
+                                                    
+                                                    // Log detailed location info for debugging
+                                                    console.log('🎯 GPS COORDINATES:', {
+                                                        latitude: latitude.toFixed(6),
+                                                        longitude: longitude.toFixed(6),
+                                                        accuracy: `±${Math.round(accuracy)}m`,
+                                                        timestamp: isValidTimestamp ? timestampDate.toISOString() : 'Unknown',
+                                                        age: isValidTimestamp ? `${Math.round((Date.now() - timestamp) / 1000)}s ago` : 'Unknown'
+                                                    })
+                                                    
+                                                    // Warn if accuracy is poor
+                                                    if (accuracy > 1000) {
+                                                        console.warn('⚠️ GPS ACCURACY WARNING: Very poor accuracy (>1km). Location may be incorrect.')
+                                                    }
+                                                    
+                                                    logger.info('Location coordinates obtained', { 
+                                                        latitude, 
+                                                        longitude, 
+                                                        accuracy, 
+                                                        timestamp: isValidTimestamp ? timestampDate.toISOString() : 'Unknown',
+                                                        isFresh: isValidTimestamp ? timestamp > Date.now() - 30000 : false
+                                                    })
+                                                    
                                                     const response = await fetch(
-                                                        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`,
-                                                        {
-                                                            headers: {
-                                                                'User-Agent': 'GroFast-App/1.0'
-                                                            }
-                                                        }
+                                                        `/api/geocode?type=reverse&lat=${latitude}&lon=${longitude}`
                                                     )
 
                                                     if (response.ok) {
                                                         const data = await response.json()
-                                                        const city = data.address?.city || data.address?.town || data.address?.village || 'Unknown City'
-                                                        const state = data.address?.state || 'Unknown State'
-                                                        const locationString = `${city}, ${state}`
+                                                        logger.info('Reverse geocoding response', data)
+                                                        
+                                                        // Extract detailed location information
+                                                        const address = data.address || {}
+                                                        
+                                                        console.log('🗺️ REVERSE GEOCODING RESULT:', {
+                                                            display_name: data.display_name,
+                                                            address: address,
+                                                            coordinates: { lat: data.lat, lon: data.lon }
+                                                        })
+                                                        
+                                                        // Enhanced location parsing for street-level accuracy
+                                                        const street = address.road || address.street
+                                                        const houseNumber = address.house_number
+                                                        const area = address.neighbourhood || address.suburb || address.residential ||
+                                                                   address.commercial || address.industrial || address.retail
+                                                        const locality = address.city_district || address.town || address.village
+                                                        const city = address.city || address.county || address.state_district
+                                                        const state = address.state || 'Unknown State'
+                                                        
+                                                        // Build a detailed location string with street-level detail
+                                                        let locationParts = []
+                                                        
+                                                        // Add street info if available
+                                                        if (street) {
+                                                            if (houseNumber) {
+                                                                locationParts.push(`${houseNumber}, ${street}`)
+                                                            } else {
+                                                                locationParts.push(street)
+                                                            }
+                                                        }
+                                                        
+                                                        // Add area/neighbourhood
+                                                        if (area && area !== city && !locationParts.includes(area)) {
+                                                            locationParts.push(area)
+                                                        }
+                                                        
+                                                        // Add locality if different from city and area
+                                                        if (locality && locality !== city && locality !== area && !locationParts.includes(locality)) {
+                                                            locationParts.push(locality)
+                                                        }
+                                                        
+                                                        // Add city
+                                                        if (city && city !== 'Unknown City' && !locationParts.includes(city)) {
+                                                            locationParts.push(city)
+                                                        }
+                                                        
+                                                        // Add state
+                                                        if (state !== 'Unknown State' && !locationParts.includes(state)) {
+                                                            locationParts.push(state)
+                                                        }
+                                                        
+                                                        // Build location string - NEVER show coordinates to user
+                                                        let locationString
+                                                        
+                                                        if (locationParts.length > 0) {
+                                                            // Use parsed address parts (preferred)
+                                                            locationString = locationParts.join(', ')
+                                                        } else if (data.display_name) {
+                                                            // Fallback to display_name parsing
+                                                            const displayParts = data.display_name.split(',').slice(0, 3)
+                                                            locationString = displayParts.map(p => p.trim()).join(', ')
+                                                        } else {
+                                                            // Last resort: generic location name
+                                                            locationString = 'Current Location'
+                                                        }
+                                                        
+                                                        // Show location confirmation if accuracy is poor or city seems wrong
+                                                        if (accuracy > 500) {
+                                                            const isConfirmed = confirm(
+                                                                `Location detected: ${locationString}\n\n` +
+                                                                `Accuracy: ±${Math.round(accuracy)}m\n\n` +
+                                                                `This location might be inaccurate due to poor GPS signal. Is this correct?`
+                                                            )
+                                                            
+                                                            if (!isConfirmed) {
+                                                                // Don't set location, keep the selector open
+                                                                console.log('🚫 User rejected detected location')
+                                                                return
+                                                            }
+                                                        }
+                                                        
+                                                        console.log('✅ FINAL LOCATION SET:', locationString)
                                                         onLocationChange(locationString)
                                                         setIsOpen(false)
-                                                        logger.userAction('Location Detected', { location: locationString })
+                                                        logger.userAction('Location Detected', { 
+                                                            location: locationString, 
+                                                            coordinates: { latitude, longitude, accuracy },
+                                                            rawAddress: address
+                                                        })
+                                                    } else {
+                                                        throw new Error(`Failed to reverse geocode: ${response.status}`)
                                                     }
                                                 } catch (error) {
                                                     logger.error('Failed to get location details', error)
+                                                    // Fallback - don't show coordinates to user
+                                                    onLocationChange('Current Location')
+                                                    setIsOpen(false)
+                                                } finally {
+                                                    setLoading(false)
                                                 }
                                             },
                                             (error) => {
-                                                logger.error('Geolocation failed', error)
+                                                // On error, reject with details
+                                                reject(error)
+                                            },
+                                            {
+                                                enableHighAccuracy: true,    // 🛰️ Force GPS over WiFi/Cell
+                                                timeout: 20000,             // 20s timeout for GPS acquisition
+                                                maximumAge: 0               // Force fresh GPS reading (no cache)
                                             }
                                         )
+                                    })
+
+                                    try {
+                                        // Try up to 3 attempts for better accuracy
+                                        let position: GeolocationPosition | null = null
+                                        let attempts = 0
+                                        let bestAccuracy = Infinity
+                                        
+                                        while (attempts < 3) {
+                                            attempts++
+                                            try {
+                                                const pos: GeolocationPosition = await getGPSLocation() as GeolocationPosition
+                                                if (pos.coords.accuracy < bestAccuracy) {
+                                                    position = pos
+                                                    bestAccuracy = pos.coords.accuracy
+                                                }
+                                                // Stop early if accuracy is good enough
+                                                if (bestAccuracy <= 50) break
+                                            } catch (e) {
+                                                // Continue to next attempt
+                                            }
+                                        }
+
+                                        if (!position) throw new Error('Failed to get GPS location')
+
+                                        // Reuse existing reverse geocoding and parsing with the best position
+                                        const { latitude, longitude, accuracy, timestamp } = position.coords
+
+                                        // Safely handle timestamp (might be null/undefined)
+                                        const timestampDate = timestamp ? new Date(timestamp) : new Date()
+                                        const isValidTimestamp = timestamp && !isNaN(timestampDate.getTime())
+
+                                        // Log detailed location info for debugging
+                                        console.log('🎯 GPS (optimized) COORDINATES:', {
+                                            latitude: latitude.toFixed(6),
+                                            longitude: longitude.toFixed(6),
+                                            accuracy: `±${Math.round(accuracy)}m`,
+                                            timestamp: isValidTimestamp ? timestampDate.toISOString() : 'Unknown',
+                                        })
+
+                                    } catch (error) {
+                                        logger.error('Failed to get optimized GPS location', error)
+                                        onLocationChange('Current Location')
+                                        setIsOpen(false)
+                                    } finally {
+                                        setLoading(false)
                                     }
                                 }}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-[#00B761] hover:bg-green-50 rounded-md transition-colors"
+                                className={`w-full flex items-center gap-2 px-3 py-2 text-[#00B761] hover:bg-green-50 rounded-md transition-colors ${
+                                    loading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                                }`}
                             >
-                                <MapPin className="h-4 w-4" />
-                                <span className="text-sm font-medium">Use Current Location</span>
+                                {loading ? (
+                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#00B761]"></div>
+                                ) : (
+                                    <MapPin className="h-4 w-4" />
+                                )}
+                                <span className="text-sm font-medium">
+                                    {loading ? 'Detecting location...' : 'Use Current Location'}
+                                </span>
                             </button>
+                            
+                            {/* Manual location input - available in all environments */}
+                            {(
+                                <>
+                                    <div className="border-t pt-2 mt-2">
+                                        <button
+                                            onClick={() => setShowManualInput(!showManualInput)}
+                                            className="w-full text-left px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 rounded-md"
+                                        >
+                                            {showManualInput ? 'Hide Manual Input' : 'Enter Location Manually'}
+                                        </button>
+                                    </div>
+                                    
+                                    {showManualInput && (
+                                        <div className="pt-2">
+                                            <div className="flex gap-2">
+                                                <input
+                                                    type="text"
+                                                    value={manualLocation}
+                                                    onChange={(e) => setManualLocation(e.target.value)}
+                                                    placeholder="Enter location manually..."
+                                                    className="flex-1 px-3 py-2 border border-gray-300 rounded text-xs text-gray-900 placeholder-gray-500"
+                                                    onKeyPress={(e) => {
+                                                        if (e.key === 'Enter' && manualLocation.trim()) {
+                                                            onLocationChange(manualLocation.trim())
+                                                            setIsOpen(false)
+                                                            setManualLocation("")
+                                                        }
+                                                    }}
+                                                />
+                                                <button
+                                                    onClick={() => {
+                                                        if (manualLocation.trim()) {
+                                                            onLocationChange(manualLocation.trim())
+                                                            setIsOpen(false)
+                                                            setManualLocation("")
+                                                        }
+                                                    }}
+                                                    disabled={!manualLocation.trim()}
+                                                    className="px-3 py-2 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 disabled:opacity-50"
+                                                >
+                                                    Set
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>
