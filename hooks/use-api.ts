@@ -48,7 +48,8 @@ export function useCart() {
     "/cart",
     () => api.getCart(),
     {
-      revalidateOnFocus: true,
+      revalidateOnFocus: false,
+      dedupingInterval: 5000, // 5 seconds
       onError: (error) => logger.error('Failed to fetch cart', error),
     }
   )

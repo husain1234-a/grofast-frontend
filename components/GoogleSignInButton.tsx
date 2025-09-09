@@ -1,10 +1,9 @@
 "use client"
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '@/app/auth-provider'
 import { LoadingSpinner } from '@/components/ui/loading'
 import { logger } from '@/lib/logger'
-import { hasValidConfig } from '@/lib/firebase'
 
 interface GoogleSignInButtonProps {
     onSuccess?: () => void
@@ -20,7 +19,27 @@ export function GoogleSignInButton({
     disabled = false
 }: GoogleSignInButtonProps) {
     const [isLoading, setIsLoading] = useState(false)
+    const [hasValidConfig, setHasValidConfig] = useState(true)
     const { loginWithGoogle } = useAuth()
+
+    useEffect(() => {
+        // Check Firebase config on client-side only
+        const firebaseConfig = {
+            apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+            authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+            projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
+        }
+        
+        const isValid = firebaseConfig.apiKey && 
+                       firebaseConfig.authDomain && 
+                       firebaseConfig.projectId &&
+                       !firebaseConfig.apiKey.startsWith('your_') &&
+                       !firebaseConfig.authDomain.startsWith('your_') &&
+                       !firebaseConfig.projectId.startsWith('your_')
+        
+        logger.debug('Firebase Config Check', { isValid, config: firebaseConfig })
+        setHasValidConfig(isValid)
+    }, [])
 
     const handleGoogleSignIn = async () => {
         if (isLoading || disabled) return

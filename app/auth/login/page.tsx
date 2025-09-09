@@ -8,6 +8,7 @@ import { useAuth } from '@/app/auth-provider';
 import { logger } from '@/lib/logger';
 import { toast } from '@/hooks/use-toast';
 import GoogleSignInButton from '@/components/GoogleSignInButton';
+import { DebugFirebaseConfig } from '@/components/DebugFirebaseConfig';
 
 export default function LoginPage() {
   const [phone, setPhone] = useState('');
@@ -66,7 +67,9 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-grofast-green to-grofast-green-dark flex items-center justify-center p-4">
+    <>
+      <DebugFirebaseConfig />
+      <div className="min-h-screen bg-gradient-to-br from-grofast-green to-grofast-green-dark flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl p-8 w-full max-w-md shadow-xl">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-grofast-green mb-2">GroFast</h1>
@@ -104,14 +107,14 @@ export default function LoginPage() {
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="10-digit mobile number"
-                  className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-grofast-green focus:border-transparent"
+                  className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-grofast-green focus:border-transparent text-gray-900 placeholder-gray-500 bg-white"
                 />
               </div>
             </div>
             <button
               onClick={sendOtp}
               disabled={loading || phone.length !== 10}
-              className="w-full bg-grofast-green text-white py-3 rounded-xl font-medium hover:bg-grofast-green-dark disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full bg-grofast-green text-white py-3 rounded-xl font-medium hover:bg-grofast-green-dark disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? 'Sending...' : 'Send OTP'}
               <ArrowRight className="w-5 h-5" />
@@ -128,14 +131,14 @@ export default function LoginPage() {
                 value={otp}
                 onChange={(e) => setOtp(e.target.value)}
                 placeholder="6-digit OTP"
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-grofast-green focus:border-transparent text-center text-2xl tracking-widest"
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-grofast-green focus:border-transparent text-center text-2xl tracking-widest text-gray-900 placeholder-gray-500 bg-white"
                 maxLength={6}
               />
             </div>
             <button
               onClick={verifyOtp}
               disabled={loading || otp.length !== 6}
-              className="w-full bg-grofast-green text-white py-3 rounded-xl font-medium hover:bg-grofast-green-dark disabled:opacity-50"
+              className="w-full bg-grofast-green text-white py-3 rounded-xl font-medium hover:bg-grofast-green-dark disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Verifying...' : 'Verify & Login'}
             </button>
@@ -149,5 +152,6 @@ export default function LoginPage() {
         )}
       </div>
     </div>
+    </>
   );
 }

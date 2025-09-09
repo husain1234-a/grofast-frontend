@@ -3,13 +3,13 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as firebaseSignOu
 import { logger } from './logger'
 
 const firebaseConfig = {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-    measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || 'AIzaSyCRvHTCK9zM003dD1zVKtROLHgJ5g9w7Uc',
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || 'grofast-d0e12.firebaseapp.com',
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'grofast-d0e12',
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'grofast-d0e12.firebasestorage.app',
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '830242192750',
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || '1:830242192750:web:15f966e73d78a407d9557f',
+    measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || 'G-92EPBN1RL1'
 }
 
 // Validate Firebase configuration
@@ -19,15 +19,28 @@ const requiredConfig = [
     'NEXT_PUBLIC_FIREBASE_PROJECT_ID'
 ]
 
-const missingConfig = requiredConfig.filter(key => !process.env[key] || process.env[key]?.startsWith('your_'))
+// Check if we have valid Firebase configuration
+const hasValidConfig = firebaseConfig.apiKey && 
+    firebaseConfig.authDomain && 
+    firebaseConfig.projectId &&
+    !firebaseConfig.apiKey.startsWith('your_') &&
+    !firebaseConfig.authDomain.startsWith('your_') &&
+    !firebaseConfig.projectId.startsWith('your_')
+
 const isDevelopment = process.env.NEXT_PUBLIC_ENV === 'development'
 
-if (missingConfig.length > 0) {
+if (!hasValidConfig) {
+    const configStatus = {
+        apiKey: !!firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith('your_'),
+        authDomain: !!firebaseConfig.authDomain && !firebaseConfig.authDomain.startsWith('your_'),
+        projectId: !!firebaseConfig.projectId && !firebaseConfig.projectId.startsWith('your_')
+    }
+    
     if (isDevelopment) {
-        logger.warn('Firebase configuration missing in development mode. Google Sign-In will be disabled.', { missingConfig })
+        logger.warn('Firebase configuration invalid in development mode. Google Sign-In will be disabled.', { configStatus, firebaseConfig })
     } else {
-        logger.error('Missing Firebase configuration', { missingConfig })
-        throw new Error(`Missing Firebase configuration: ${missingConfig.join(', ')}`)
+        logger.error('Invalid Firebase configuration', { configStatus })
+        throw new Error(`Invalid Firebase configuration. Check: ${Object.entries(configStatus).filter(([,valid]) => !valid).map(([key]) => key).join(', ')}`)
     }
 }
 
@@ -35,8 +48,6 @@ if (missingConfig.length > 0) {
 let app: any = null
 let auth: any = null
 let googleProvider: any = null
-
-const hasValidConfig = missingConfig.length === 0
 
 if (hasValidConfig) {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp()
