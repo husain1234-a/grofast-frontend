@@ -85,34 +85,121 @@ export function LocationSelector({
 
         setLoading(true)
         try {
-            // Using a free geocoding API (OpenStreetMap Nominatim)
-            const response = await fetch(
-                `https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&city=${encodeURIComponent(query)}&limit=10&addressdetails=1`,
-                {
-                    headers: {
-                        'User-Agent': 'GroFast-App/1.0'
+            // Using our proxy API to avoid CORS issues
+            // Try multiple search strategies for better results
+            const searchQueries = [
+                query, // Original query
+                `${query} India`, // Add India for better context
+                query.split(' ')[0] // First word only
+            ]
+            
+            let bestResults: City[] = []
+            
+            for (const searchQuery of searchQueries) {
+                const response = await fetch(
+                    `/api/geocode?type=search&query=${encodeURIComponent(searchQuery)}`
+                )
+                
+                if (response.ok) {
+                    const data = await response.json()
+                    // Handle both array and object responses
+                    let results = []
+                    
+                    if (Array.isArray(data)) {
+                        results = data
+                    } else if (data.results && Array.isArray(data.results)) {
+                        results = data.results
+                    } else if (typeof data === 'object' && data !== null) {
+                        // Convert object with numbered keys to array
+                        results = Object.keys(data)
+                            .filter(key => !isNaN(Number(key))) // Only numeric keys
+                            .map(key => data[key])
+                            .filter(item => item && typeof item === 'object') // Valid objects only
+                    }
+                    
+                    if (results.length > 0) {
+                        bestResults = results
+                        break // Use first successful result
                     }
                 }
-            )
+            }
+            
+            if (bestResults.length > 0) {
 
-            if (response.ok) {
-                const data = await response.json()
-                const formattedCities: City[] = data
-                    .filter((item: any) => item.address?.city || item.address?.town || item.address?.village)
-                    .map((item: any) => ({
-                        name: item.address?.city || item.address?.town || item.address?.village || item.display_name.split(',')[0],
-                        state: item.address?.state || 'Unknown State',
-                        country: 'India',
-                        lat: parseFloat(item.lat),
-                        lon: parseFloat(item.lon)
-                    }))
-                    .filter((city: City, index: number, self: City[]) =>
-                        // Remove duplicates
-                        index === self.findIndex(c => c.name === city.name && c.state === city.state)
-                    )
+                const formattedCities: City[] = bestResults
+                    .filter((item: any) => {
+                        // Enhanced filtering for cities, streets, landmarks, and areas
+                        const address = item.address || {}
+                        const hasRelevantLocation = address.city || address.town || address.village || address.municipality || 
+                                                  address.suburb || address.neighbourhood || address.road || address.street || 
+                                                  address.house_number || item.name
+                        const isInIndia = address.country_code === 'in' || address.country === 'India' || item.display_name?.includes('India')
+                        
+                        // Debug only in development
+                        if (process.env.NEXT_PUBLIC_ENV === 'development') {
+                            console.log('Filtering city:', item.name, hasRelevantLocation, isInIndia)
+                        }
+                        
+                        return hasRelevantLocation && isInIndia
+                    })
+                    .map((item: any) => {
+                        const address = item.address || {}
+                        // Enhanced name extraction for streets and landmarks
+                        let locationName = ''
+                        let locationType = ''
+                        
+                        if (address.road || address.street) {
+                            // Street/Road
+                            locationName = address.road || address.street
+                            locationType = 'Street'
+                            if (address.house_number) {
+                                locationName = `${address.house_number}, ${locationName}`
+                            }
+                        } else if (address.neighbourhood || address.suburb) {
+                            // Area/Neighbourhood
+                            locationName = address.neighbourhood || address.suburb
+                            locationType = 'Area'
+                        } else if (item.name) {
+                            // Landmark or named place
+                            locationName = item.name
+                            locationType = item.class === 'amenity' ? 'Landmark' : 'Place'
+                        } else {
+                            // City/Town fallback
+                            locationName = address.city || address.municipality || address.town || address.village || 
+                                         item.display_name.split(',')[0].trim()
+                            locationType = 'City'
+                        }
+                        
+                        const cityName = locationName
+                        const stateName = address.state || address.state_district || 'Unknown State'
+                        
+                        return {
+                            name: cityName,
+                            state: stateName,
+                            country: 'India',
+                            lat: parseFloat(item.lat),
+                            lon: parseFloat(item.lon),
+                            type: locationType,
+                            fullAddress: item.display_name
+                        }
+                    })
+                    .filter((city: City, index: number, self: City[]) => {
+                        // Remove duplicates and filter out invalid names
+                        if (!city.name || city.name.length < 2) return false
+                        
+                        const isDuplicate = index !== self.findIndex(c => 
+                            c.name.toLowerCase() === city.name.toLowerCase() && 
+                            c.state.toLowerCase() === city.state.toLowerCase()
+                        )
+                        return !isDuplicate
+                    })
+                    .slice(0, 8) // Limit to top 8 results
 
                 setCities(formattedCities)
                 logger.info('Cities search completed', { query, resultsCount: formattedCities.length })
+            } else {
+                // No results found from API
+                setCities([])
             }
         } catch (error) {
             logger.error('Failed to search cities', error)
@@ -184,8 +271,8 @@ export function LocationSelector({
                                 type="text"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
-                                placeholder="Search for your city..."
-                                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#00B761] focus:border-transparent outline-none"
+                                placeholder="Search for city, area, street, or landmark..."
+                                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#00B761] focus:border-transparent outline-none text-gray-900 placeholder-gray-500"
                             />
                         </div>
 
@@ -209,8 +296,17 @@ export function LocationSelector({
                                             onClick={() => handleLocationSelect(city)}
                                             className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded-md transition-colors"
                                         >
-                                            <div className="font-medium text-gray-900">{city.name}</div>
-                                            <div className="text-sm text-gray-500">{city.state}, {city.country}</div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="font-medium text-gray-900">{city.name}</div>
+                                                {city.type && (
+                                                    <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
+                                                        {city.type}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="text-sm text-gray-500">
+                                                {city.fullAddress ? city.fullAddress.split(',').slice(1, 3).join(',').trim() : `${city.state}, ${city.country}`}
+                                            </div>
                                         </button>
                                     ))}
                                 </div>
