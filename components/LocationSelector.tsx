@@ -10,6 +10,8 @@ interface City {
     country: string
     lat?: number
     lon?: number
+    type?: string
+    fullAddress?: string
 }
 
 interface LocationSelectorProps {
