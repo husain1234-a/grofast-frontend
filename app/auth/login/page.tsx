@@ -8,7 +8,6 @@ import { useAuth } from '@/app/auth-provider';
 import { logger } from '@/lib/logger';
 import { toast } from '@/hooks/use-toast';
 import GoogleSignInButton from '@/components/GoogleSignInButton';
-import { DebugFirebaseConfig } from '@/components/DebugFirebaseConfig';
 
 export default function LoginPage() {
   const [phone, setPhone] = useState('');
@@ -67,9 +66,7 @@ export default function LoginPage() {
   };
 
   return (
-    <>
-      <DebugFirebaseConfig />
-      <div className="min-h-screen bg-gradient-to-br from-grofast-green to-grofast-green-dark flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-grofast-green to-grofast-green-dark flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl p-8 w-full max-w-md shadow-xl">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-grofast-green mb-2">GroFast</h1>
@@ -152,6 +149,5 @@ export default function LoginPage() {
         )}
       </div>
     </div>
-    </>
   );
 }

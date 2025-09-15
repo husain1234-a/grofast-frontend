@@ -113,7 +113,7 @@ async function request<T>(
   }
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), opts.timeout || 30000)
+  const timeoutId = setTimeout(() => controller.abort(), opts.timeout || 10000)
 
   try {
     const res = await fetch(url, {
@@ -188,7 +188,6 @@ export const api = {
   },
   me(firebase_token?: string) {
     if (firebase_token) {
-      // Use query parameter method for /auth/me endpoint
       return request(`/auth/me?firebase_token=${firebase_token}`)
     }
     return request("/auth/me", { auth: true })
